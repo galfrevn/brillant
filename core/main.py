@@ -359,11 +359,16 @@ def main():
                     print(f"{Fore.RED}Opponent has mate in {mate_moves}. "
                           f"Best: {best_san}{Style.RESET_ALL}")
 
-                # Arrow for the first move only
+                # Draw full mate sequence as numbered arrows
                 if args.assist:
-                    color = "#ff3333" if our_mate else "#cc0000"
-                    reader.draw_arrow(best_uci[:2], best_uci[2:4], color=color, width=12,
-                                      label=f"M{mate_moves}")
+                    if our_mate:
+                        reader.draw_move_sequence(
+                            best_pv_uci, player_turn,
+                            our_color="#ff3333", opp_color="#888888")
+                    else:
+                        reader.draw_move_sequence(
+                            best_pv_uci, player_turn,
+                            our_color="#cc0000", opp_color="#888888")
             else:
                 # Re-rank by style if we have a profile
                 style_pick = None

@@ -116,8 +116,9 @@ def show_stats():
     openings = tracker.get_opening_stats()
     tracker.close()
 
-    if stats["total_games"] == 0:
-        print("No games recorded yet. Play some games first!")
+    if stats["total_moves"] == 0:
+        print(f"  Games played: {stats['total_games']}, but no moves analyzed yet.")
+        print("  Play some games with the tool running first!")
         return
 
     print(f"\n{Fore.CYAN}{Style.BRIGHT}=== YOUR PLAYING STYLE ==={Style.RESET_ALL}\n")

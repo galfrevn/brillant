@@ -72,7 +72,7 @@ mate sequences with premove suggestions and can draw move arrows directly on the
 
 ## Usage
 
-Run from the `chess/` subdirectory:
+Run from the `core/` subdirectory:
 
 ```
 cd chess
@@ -124,7 +124,7 @@ py main.py
 ## Configuration
 
 On first run, if no `config.json` exists the tool uses sensible defaults. You can create
-a `config.json` in the `chess/` directory to override settings:
+a `config.json` in the `core/` directory to override settings:
 
 ```json
 {
@@ -156,7 +156,7 @@ a `config.json` in the `chess/` directory to override settings:
 
 ```
 brillant/
-├── chess/
+├── core/
 │   ├── main.py           # Entry point, monitoring loop, CLI
 │   ├── config.py         # Configuration loading (JSON + defaults)
 │   ├── engine.py         # Stockfish UCI wrapper (MultiPV analysis)

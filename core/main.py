@@ -91,14 +91,25 @@ def get_elo_premove_settings(opponent_elo):
         return 1, 10, 0.5
 
 
-def get_clock_overrides(our_time, config):
-    """Return (depth, time_limit, poll_interval) adjusted for time pressure."""
+def get_elo_analysis_settings(opponent_elo, config):
+    """Return (depth, time_limit) for main analysis adjusted by opponent ELO."""
+    if opponent_elo is None or opponent_elo > 1800:
+        return config["depth"], config["engine_time"]
+    elif opponent_elo > 1200:
+        return min(config["depth"], 16), min(config["engine_time"], 1.5)
+    else:
+        return min(config["depth"], 14), min(config["engine_time"], 1.0)
+
+
+def get_clock_overrides(our_time, elo_depth, elo_time, config):
+    """Return (depth, time_limit, poll_interval) adjusted for time pressure.
+    Takes ELO-adjusted depth/time as baseline instead of config defaults."""
     if our_time is None or our_time > 60:
-        return config["depth"], config["engine_time"], config["poll_interval"]
+        return elo_depth, elo_time, config["poll_interval"]
     elif our_time > 30:
-        return 16, 1.5, 0.3
+        return min(elo_depth, 16), min(elo_time, 1.5), 0.3
     elif our_time > 10:
-        return 12, 0.8, 0.2
+        return min(elo_depth, 12), min(elo_time, 0.8), 0.2
     else:
         return 8, 0.3, 0.15
 
@@ -271,6 +282,7 @@ def main():
     in_game = False
     opponent_elo = None
     pm_candidates, pm_depth, pm_time = 3, 14, 1.0  # premove settings (adjusted by ELO)
+    elo_depth, elo_time = config["depth"], config["engine_time"]  # main analysis (adjusted by ELO)
     tracker = StyleTracker()
     style_profile = tracker.get_style_profile()
     if style_profile:
@@ -342,9 +354,10 @@ def main():
                 color_display = "white" if player_color == 1 else "black"
                 game_id = tracker.start_game(color_display)
 
-                # Read opponent ELO and set premove strategy
+                # Read opponent ELO and adapt strategy
                 opponent_elo = state.get("opponent_elo")
                 pm_candidates, pm_depth, pm_time = get_elo_premove_settings(opponent_elo)
+                elo_depth, elo_time = get_elo_analysis_settings(opponent_elo, config)
                 elo_str = str(opponent_elo) if opponent_elo else "?"
                 print(f"[{ts()}] {Fore.GREEN}Game active!{Style.RESET_ALL} "
                       f"Playing as {Fore.CYAN}{color_display}{Style.RESET_ALL} "
@@ -363,9 +376,9 @@ def main():
                     # Position deviated from forced line
                     forced_mate_fens = None
 
-            # 5. Adapt to clock pressure
+            # 5. Adapt to clock pressure (ELO-adjusted baseline)
             our_time = state.get("our_time")
-            clock_depth, clock_time, clock_poll = get_clock_overrides(our_time, config)
+            clock_depth, clock_time, clock_poll = get_clock_overrides(our_time, elo_depth, elo_time, config)
             poll = clock_poll
 
             # 6. Determine whose turn it is from FEN

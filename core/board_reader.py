@@ -115,7 +115,7 @@ class ChessBoardReader:
             try { fen = b.game.getFEN(); } catch(e) { return null; }
 
             // Detect player color from board orientation
-            const flipped = b.hasAttribute('flipped') ||
+            const flipped = !!b.flipped || b.hasAttribute('flipped') ||
                 (b.getAttribute('class') || '').includes('flipped');
             const playing_as = flipped ? 2 : 1;
 
@@ -205,7 +205,7 @@ class ChessBoardReader:
             const rect = target.getBoundingClientRect();
             if (rect.width === 0) return 'no-rect';
             const sqSize = rect.width / 8;
-            const flipped = board.hasAttribute('flipped') ||
+            const flipped = !!board.flipped || board.hasAttribute('flipped') ||
                             (board.getAttribute('class') || '').includes('flipped');
 
             function sqToXY(sq) {{
@@ -326,7 +326,7 @@ class ChessBoardReader:
             const rect = target.getBoundingClientRect();
             if (rect.width === 0) return 'no-rect';
             const sqSize = rect.width / 8;
-            const flipped = board.hasAttribute('flipped') ||
+            const flipped = !!board.flipped || board.hasAttribute('flipped') ||
                             (board.getAttribute('class') || '').includes('flipped');
 
             function sqToXY(sq) {{

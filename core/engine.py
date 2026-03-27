@@ -3,9 +3,10 @@ import chess.engine
 
 
 class StockfishEngine:
-    def __init__(self, path="stockfish/stockfish.exe", depth=20, threads=2, hash_size=128):
+    def __init__(self, path="stockfish/stockfish.exe", depth=20, threads=2, hash_size=128, engine_time=5):
         self.path = path
         self.depth = depth
+        self.engine_time = engine_time
         self.threads = threads
         self.hash_size = hash_size
         self._start_engine()
@@ -19,7 +20,7 @@ class StockfishEngine:
         try:
             results = self.engine.analyse(
                 board,
-                chess.engine.Limit(depth=self.depth, time=10),
+                chess.engine.Limit(depth=self.depth, time=self.engine_time),
                 multipv=num_moves,
             )
         except (chess.engine.EngineTerminatedError, chess.engine.EngineError, Exception):
@@ -40,14 +41,16 @@ class StockfishEngine:
             eval_cp = score.score(mate_score=100000)
             mate_in = score.mate()
 
-            # Convert full PV to SAN
+            # Convert full PV to SAN and UCI
             pv_san = []
+            pv_uci = []
             temp = board.copy()
             for m in info["pv"]:
                 pv_san.append(temp.san(m))
+                pv_uci.append(m.uci())
                 temp.push(m)
 
-            moves.append((move_uci, move_san, eval_cp, mate_in, pv_san))
+            moves.append((move_uci, move_san, eval_cp, mate_in, pv_san, pv_uci))
 
         return moves
 

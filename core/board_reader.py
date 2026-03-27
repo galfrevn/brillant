@@ -242,6 +242,142 @@ class ChessBoardReader:
         """
         return self._eval_js(js)
 
+    def draw_move_sequence(self, moves, player_color="w", our_color="#ff3333", opp_color="#888888"):
+        """Draw a full PV sequence. Player moves are bold+numbered, opponent moves are dim."""
+        if not moves:
+            return
+        move_data = []
+        player_num = 0
+        for i, uci in enumerate(moves):
+            is_ours = (i % 2 == 0)
+            if is_ours:
+                player_num += 1
+            move_data.append({
+                "from": uci[:2],
+                "to": uci[2:4],
+                "ours": is_ours,
+                "label": str(player_num) if is_ours else None,
+            })
+
+        import json as _json
+        moves_json = _json.dumps(move_data)
+
+        js = f"""
+        (() => {{
+            const board = document.querySelector('wc-chess-board');
+            if (!board) return 'no-board';
+            const canvas = board.querySelector('canvas');
+            const target = canvas || board;
+            const rect = target.getBoundingClientRect();
+            if (rect.width === 0) return 'no-rect';
+            const sqSize = rect.width / 8;
+            const flipped = board.hasAttribute('flipped') ||
+                            (board.getAttribute('class') || '').includes('flipped');
+
+            function sqToXY(sq) {{
+                const file = sq.charCodeAt(0) - 97;
+                const rank = parseInt(sq[1]) - 1;
+                let x, y;
+                if (flipped) {{
+                    x = rect.left + (7 - file + 0.5) * sqSize;
+                    y = rect.top + (rank + 0.5) * sqSize;
+                }} else {{
+                    x = rect.left + (file + 0.5) * sqSize;
+                    y = rect.top + (7 - rank + 0.5) * sqSize;
+                }}
+                return [x, y];
+            }}
+
+            let svg = document.getElementById('chess-detector-arrows');
+            if (!svg) {{
+                svg = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
+                svg.id = 'chess-detector-arrows';
+                svg.style.cssText = 'position:fixed;top:0;left:0;width:100vw;height:100vh;pointer-events:none;z-index:99999;';
+                document.body.appendChild(svg);
+            }}
+
+            let defs = svg.querySelector('defs');
+            if (!defs) {{
+                defs = document.createElementNS('http://www.w3.org/2000/svg', 'defs');
+                svg.appendChild(defs);
+            }}
+            function ensureMarker(id, color) {{
+                if (document.getElementById(id)) return;
+                const marker = document.createElementNS('http://www.w3.org/2000/svg', 'marker');
+                marker.id = id;
+                marker.setAttribute('markerWidth', '10');
+                marker.setAttribute('markerHeight', '7');
+                marker.setAttribute('refX', '10');
+                marker.setAttribute('refY', '3.5');
+                marker.setAttribute('orient', 'auto');
+                marker.setAttribute('markerUnits', 'strokeWidth');
+                const poly = document.createElementNS('http://www.w3.org/2000/svg', 'polygon');
+                poly.setAttribute('points', '0 0, 10 3.5, 0 7');
+                poly.setAttribute('fill', color);
+                marker.appendChild(poly);
+                defs.appendChild(marker);
+            }}
+            ensureMarker('chess-seq-arrow-ours', '{our_color}');
+            ensureMarker('chess-seq-arrow-opp', '{opp_color}');
+
+            const moves = {moves_json};
+            for (const m of moves) {{
+                const [x1, y1] = sqToXY(m.from);
+                const [x2, y2] = sqToXY(m.to);
+
+                const line = document.createElementNS('http://www.w3.org/2000/svg', 'line');
+                line.setAttribute('x1', x1);
+                line.setAttribute('y1', y1);
+                line.setAttribute('x2', x2);
+                line.setAttribute('y2', y2);
+
+                if (m.ours) {{
+                    line.setAttribute('stroke', '{our_color}');
+                    line.setAttribute('stroke-width', '12');
+                    line.setAttribute('stroke-opacity', '0.8');
+                    line.setAttribute('marker-end', 'url(#chess-seq-arrow-ours)');
+                }} else {{
+                    line.setAttribute('stroke', '{opp_color}');
+                    line.setAttribute('stroke-width', '6');
+                    line.setAttribute('stroke-opacity', '0.4');
+                    line.setAttribute('marker-end', 'url(#chess-seq-arrow-opp)');
+                }}
+                line.setAttribute('stroke-linecap', 'round');
+                line.classList.add('chess-detector-arrow');
+                svg.appendChild(line);
+
+                if (m.label) {{
+                    const mx = (x1 + x2) / 2;
+                    const my = (y1 + y2) / 2;
+                    const r = sqSize * 0.2;
+
+                    const circle = document.createElementNS('http://www.w3.org/2000/svg', 'circle');
+                    circle.setAttribute('cx', mx);
+                    circle.setAttribute('cy', my);
+                    circle.setAttribute('r', r);
+                    circle.setAttribute('fill', '{our_color}');
+                    circle.classList.add('chess-detector-arrow');
+                    svg.appendChild(circle);
+
+                    const text = document.createElementNS('http://www.w3.org/2000/svg', 'text');
+                    text.setAttribute('x', mx);
+                    text.setAttribute('y', my);
+                    text.setAttribute('text-anchor', 'middle');
+                    text.setAttribute('dominant-baseline', 'central');
+                    text.setAttribute('fill', 'white');
+                    text.setAttribute('font-size', r * 1.6);
+                    text.setAttribute('font-weight', 'bold');
+                    text.setAttribute('font-family', 'Arial, sans-serif');
+                    text.textContent = m.label;
+                    text.classList.add('chess-detector-arrow');
+                    svg.appendChild(text);
+                }}
+            }}
+            return true;
+        }})()
+        """
+        return self._eval_js(js)
+
     def clear_arrows(self):
         """Remove all drawn arrows."""
         js = """

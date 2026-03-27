@@ -260,6 +260,8 @@ def parse_args():
                         help="Highlight squares where your pieces are under attack")
     parser.add_argument("--review", action="store_true",
                         help="Show post-game review with accuracy and move classification")
+    parser.add_argument("--tactics-only", action="store_true",
+                        help="Only show tactical patterns — no best moves, no premoves")
     return parser.parse_args()
 
 
@@ -494,7 +496,7 @@ def main():
                     last_engine_best = None
 
                 # Opponent's turn — launch premoves in background thread
-                if fen != last_analyzed_fen and "K" in fen and "k" in fen:
+                if not args.tactics_only and fen != last_analyzed_fen and "K" in fen and "k" in fen:
                     last_analyzed_fen = fen
                     if premove_thread is None or not premove_thread.is_alive():
                         premove_thread = threading.Thread(
@@ -526,6 +528,46 @@ def main():
                     prev_board = None
 
             last_analyzed_fen = fen
+
+            # Tactics-only mode: detect patterns without engine analysis
+            if args.tactics_only:
+                try:
+                    tac_board = chess.Board(fen)
+                    # Offensive: check each legal move for tactics
+                    found_any = False
+                    for move in tac_board.legal_moves:
+                        tactic = classify_tactic(tac_board, move)
+                        if tactic:
+                            san = tac_board.san(move)
+                            print(f"[{ts()}] {Fore.YELLOW}{tactic}: {san}{Style.RESET_ALL}")
+                            if args.assist:
+                                uci = move.uci()
+                                with reader_lock:
+                                    if not found_any:
+                                        reader.clear_arrows()
+                                    reader.draw_arrow(uci[:2], uci[2:4], color="#ffcc00",
+                                                      width=10, label=tactic)
+                            found_any = True
+
+                    # Defensive: opponent threats
+                    threats = find_opponent_threats(tac_board)
+                    for t in threats:
+                        print(f"[{ts()}] {Fore.RED}  Threat: {t['move_san']} ({t['tactic']}){Style.RESET_ALL}")
+
+                    # Heatmap
+                    if args.heatmap and args.assist:
+                        threatened = []
+                        for sq in chess.SQUARES:
+                            p = tac_board.piece_at(sq)
+                            if p and p.color == tac_board.turn:
+                                if tac_board.is_attacked_by(not tac_board.turn, sq):
+                                    threatened.append(chess.square_name(sq))
+                        if threatened:
+                            with reader_lock:
+                                reader.draw_heatmap(threatened)
+                except Exception:
+                    pass
+                continue
 
             # 8. Analyze! (depth/time adapted to clock)
             print(f"[{ts()}] Analyzing...", end=" ", flush=True)

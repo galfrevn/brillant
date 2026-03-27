@@ -12,7 +12,7 @@ from colorama import Fore, Style, init as colorama_init
 from config import load_config
 from engine import StockfishEngine
 from board_reader import ChessBoardReader
-from brilliant import find_brilliant_move
+from brilliant import find_brilliant_move, PIECE_VALUES
 from tactics import classify_tactic, find_opponent_threats
 from style import StyleTracker
 
@@ -345,7 +345,6 @@ def main():
     forced_mate_fens = None  # set of position keys when forced mate sequence is active
 
     poll = config["poll_interval"]
-    base_poll = poll  # remember original for clock reset
     prev_fen = None
     last_analyzed_fen = None
     player_color = None
@@ -554,14 +553,27 @@ def main():
                     for t in threats:
                         print(f"[{ts()}] {Fore.RED}  Threat: {t['move_san']} ({t['tactic']}){Style.RESET_ALL}")
 
-                    # Heatmap
+                    # Heatmap: only pieces in real danger
                     if args.heatmap and args.assist:
                         threatened = []
                         for sq in chess.SQUARES:
                             p = tac_board.piece_at(sq)
-                            if p and p.color == tac_board.turn:
-                                if tac_board.is_attacked_by(not tac_board.turn, sq):
-                                    threatened.append(chess.square_name(sq))
+                            if not p or p.color != tac_board.turn:
+                                continue
+                            if not tac_board.is_attacked_by(not tac_board.turn, sq):
+                                continue
+                            defended = tac_board.is_attacked_by(tac_board.turn, sq)
+                            if not defended:
+                                threatened.append(chess.square_name(sq))
+                                continue
+                            our_val = PIECE_VALUES.get(p.symbol().upper(), 0)
+                            for attacker_sq in tac_board.attackers(not tac_board.turn, sq):
+                                atk = tac_board.piece_at(attacker_sq)
+                                if atk:
+                                    atk_val = PIECE_VALUES.get(atk.symbol().upper(), 0)
+                                    if atk_val < our_val:
+                                        threatened.append(chess.square_name(sq))
+                                        break
                         if threatened:
                             with reader_lock:
                                 reader.draw_heatmap(threatened)
@@ -615,16 +627,32 @@ def main():
             except Exception:
                 threats = []
 
-            # Heatmap: highlight our pieces under attack
+            # Heatmap: highlight our pieces that are in real danger
+            # (attacked by opponent AND either undefended or attacked by lower-value piece)
             if args.heatmap and args.assist:
                 try:
-                    hm_board = chess.Board(fen)
+                    tac_board_hm = chess.Board(fen)
                     threatened = []
                     for sq in chess.SQUARES:
-                        p = hm_board.piece_at(sq)
-                        if p and p.color == hm_board.turn:
-                            if hm_board.is_attacked_by(not hm_board.turn, sq):
-                                threatened.append(chess.square_name(sq))
+                        p = tac_board_hm.piece_at(sq)
+                        if not p or p.color != tac_board_hm.turn:
+                            continue
+                        if not tac_board_hm.is_attacked_by(not tac_board_hm.turn, sq):
+                            continue
+                        # Check if adequately defended
+                        defended = tac_board_hm.is_attacked_by(tac_board_hm.turn, sq)
+                        if not defended:
+                            threatened.append(chess.square_name(sq))
+                            continue
+                        # Defended, but check if a lower-value attacker makes it a bad trade
+                        our_val = PIECE_VALUES.get(p.symbol().upper(), 0)
+                        for attacker_sq in tac_board_hm.attackers(not tac_board_hm.turn, sq):
+                            atk = tac_board_hm.piece_at(attacker_sq)
+                            if atk:
+                                atk_val = PIECE_VALUES.get(atk.symbol().upper(), 0)
+                                if atk_val < our_val:
+                                    threatened.append(chess.square_name(sq))
+                                    break
                     if threatened:
                         with reader_lock:
                             reader.draw_heatmap(threatened)
@@ -675,8 +703,8 @@ def main():
                         reader.draw_arrow(uci[:2], uci[2:4], color="#ffcc00", width=12, label="!!")
             elif best_mate is not None:
                 mate_moves = abs(best_mate)
-                our_mate = (player_turn == "w" and best_mate > 0) or \
-                           (player_turn == "b" and best_mate < 0)
+                # Eval is from side-to-move perspective: positive mate = our mate
+                our_mate = best_mate > 0
                 if our_mate:
                     our_moves = [best_pv[i] for i in range(0, len(best_pv), 2)]
                     sequence = " → ".join(our_moves)

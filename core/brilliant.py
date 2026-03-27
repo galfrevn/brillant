@@ -117,8 +117,8 @@ def find_brilliant_move(fen, engine, last_move_square=None, top_moves=None):
         return None
 
     # --- Criterion 4: positive outcome (>= -200 cp from side-to-move) ---
-    side_eval = eval_1 if board.turn == chess.WHITE else -eval_1
-    if side_eval < -200:
+    # eval_1 is already from side-to-move perspective
+    if eval_1 < -200:
         return None
 
     # All criteria passed — build the result

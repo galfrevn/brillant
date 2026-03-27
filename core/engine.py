@@ -39,7 +39,8 @@ class StockfishEngine:
             move = info["pv"][0]
             move_uci = move.uci()
             move_san = board.san(move)
-            score = info["score"].white()
+            # Eval from side-to-move perspective (positive = good for us)
+            score = info["score"].pov(board.turn)
             eval_cp = score.score(mate_score=100000)
             mate_in = score.mate()
 

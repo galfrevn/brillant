@@ -124,8 +124,8 @@ def _is_pin(board, move):
 
 
 def _is_skewer(board, move):
-    """After the move, does a sliding piece attack a valuable piece that has
-    a less valuable piece behind it on the same line?"""
+    """After the move, does a sliding piece attack a valuable piece that,
+    if moved, exposes a less valuable piece behind it on the same ray?"""
     board.push(move)
     to_sq = move.to_square
     attacker = board.piece_at(to_sq)
@@ -134,7 +134,6 @@ def _is_skewer(board, move):
         return False
 
     our_color = attacker.color
-    # Check each enemy piece attacked by us
     for target_sq in board.attacks(to_sq):
         target = board.piece_at(target_sq)
         if not target or target.color == our_color:
@@ -142,21 +141,46 @@ def _is_skewer(board, move):
         if _piece_value(target) < 3:
             continue
 
-        # Is there a less valuable piece behind the target on the same ray?
-        ray = chess.ray(to_sq, target_sq)
-        if not ray:
+        # Check ray from attacker through target for a piece behind
+        between_after = chess.between(to_sq, target_sq)
+        # Make sure nothing is between attacker and target (clean line)
+        blocked = False
+        for bsq in chess.scan_forward(between_after):
+            if board.piece_at(bsq):
+                blocked = True
+                break
+        if blocked:
             continue
-        # Extend beyond target
-        behind = chess.between(target_sq, chess.msb(ray) if target_sq < chess.msb(ray) else chess.lsb(ray))
-        for bsq in chess.scan_forward(chess.BB_SQUARES[target_sq + 1:] if False else 0):
-            pass  # Ray extension is complex
+
+        # Extend ray beyond target: scan squares on the same ray past the target
+        # Direction: from attacker (to_sq) through target (target_sq) and beyond
+        file_diff = chess.square_file(target_sq) - chess.square_file(to_sq)
+        rank_diff = chess.square_rank(target_sq) - chess.square_rank(to_sq)
+        # Normalize to -1, 0, 1
+        df = (1 if file_diff > 0 else -1) if file_diff != 0 else 0
+        dr = (1 if rank_diff > 0 else -1) if rank_diff != 0 else 0
+
+        # Walk beyond target
+        sq = target_sq
+        while True:
+            f = chess.square_file(sq) + df
+            r = chess.square_rank(sq) + dr
+            if not (0 <= f <= 7 and 0 <= r <= 7):
+                break
+            sq = chess.square(f, r)
+            behind_piece = board.piece_at(sq)
+            if behind_piece:
+                if behind_piece.color != our_color and _piece_value(behind_piece) < _piece_value(target):
+                    board.pop()
+                    return True
+                break  # blocked by any piece
 
     board.pop()
-    return False  # Skewer detection is complex, keep it simple for now
+    return False
 
 
 def classify_tactic(board, move):
-    """Classify a move's tactic. Returns 'Fork', 'Pin', 'Disc+', or None."""
+    """Classify a move's tactic. Returns 'Fork', 'Pin', 'Skewer', 'Disc+', or None."""
     if isinstance(move, str):
         move = chess.Move.from_uci(move)
 
@@ -164,6 +188,8 @@ def classify_tactic(board, move):
         return "Fork"
     if _is_pin(board, move):
         return "Pin"
+    if _is_skewer(board, move):
+        return "Skewer"
     if _is_discovered_attack(board, move):
         return "Disc+"
     return None
@@ -173,24 +199,11 @@ def find_opponent_threats(board):
     """Find tactical threats the opponent has in the current position.
     Returns list of {move_san, move_uci, tactic} dicts, max 3."""
     threats = []
-    # Temporarily flip perspective: analyze from opponent's side
-    # The board has current side to move, opponent threats = what they could do
-    # We need to check opponent's moves, so we look at legal moves if it were their turn
-    # But it IS our turn, so we simulate their turn by checking the previous state.
-    # Actually: threats = on their NEXT move. So push a null... no.
-    # Simpler: for each opponent piece, check if any of their attacks create forks/pins.
-
-    # We check: if it were the opponent's turn, which moves would be tactical?
+    # Flip turn using chess.Board.turn property (preserves full board state)
     opp_board = board.copy()
-    # Flip turn (set opponent to move) — hacky but works for threat detection
-    fen_parts = opp_board.fen().split()
-    fen_parts[1] = "b" if fen_parts[1] == "w" else "w"
-    # Clear en passant to avoid illegal state issues
-    fen_parts[3] = "-"
-    try:
-        opp_board = chess.Board(" ".join(fen_parts))
-    except ValueError:
-        return []
+    opp_board.turn = not opp_board.turn
+    # Clear castling rights to avoid pseudo-legal issues with flipped turn
+    opp_board.castling_rights = chess.BB_EMPTY
 
     for move in opp_board.legal_moves:
         tactic = classify_tactic(opp_board, move)

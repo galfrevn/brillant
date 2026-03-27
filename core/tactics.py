@@ -13,7 +13,18 @@ def _piece_value(piece):
 
 
 def _is_fork(board, move):
-    """After the move, does the moved piece attack 2+ enemy pieces of value?"""
+    """Does the move create a fork — the moved piece attacks 2+ valuable enemy pieces
+    that it wasn't attacking before?"""
+    from_sq = move.from_square
+
+    # Count valuable targets attacked from the origin square
+    attacked_before = set()
+    for sq in board.attacks(from_sq):
+        target = board.piece_at(sq)
+        if target and target.color != board.turn:
+            if target.piece_type == chess.KING or _piece_value(target) > 1:
+                attacked_before.add(sq)
+
     board.push(move)
     attacker_sq = move.to_square
     attacker = board.piece_at(attacker_sq)
@@ -21,15 +32,17 @@ def _is_fork(board, move):
         board.pop()
         return False
 
-    attacked_valuable = []
+    attacked_after = set()
     for sq in board.attacks(attacker_sq):
         target = board.piece_at(sq)
         if target and target.color != attacker.color:
             if target.piece_type == chess.KING or _piece_value(target) > 1:
-                attacked_valuable.append(target)
+                attacked_after.add(sq)
 
     board.pop()
-    return len(attacked_valuable) >= 2
+    # Must attack 2+ valuable pieces, and at least one must be new
+    new_attacks = attacked_after - attacked_before
+    return len(attacked_after) >= 2 and len(new_attacks) >= 1
 
 
 def _is_discovered_attack(board, move):
@@ -71,46 +84,43 @@ def _is_discovered_attack(board, move):
     return len(new_attacks) > 0
 
 
-def _is_pin(board, move):
-    """After the move, is an enemy piece pinned against the enemy king?"""
-    board.push(move)
-    enemy = not board.turn  # opponent of the side that just moved
+def _find_pins(board, color):
+    """Find all pinned enemy pieces for the given color's sliding pieces."""
+    enemy = not color
     enemy_king_sq = board.king(enemy)
     if enemy_king_sq is None:
-        board.pop()
-        return False
-
-    # Check all our sliding pieces for pins
-    our_color = not enemy
+        return set()
+    pinned = set()
     for sq in chess.SQUARES:
         p = board.piece_at(sq)
-        if not p or p.color != our_color:
+        if not p or p.color != color:
             continue
         if p.piece_type not in (chess.BISHOP, chess.ROOK, chess.QUEEN):
             continue
-
-        # Check ray from our piece toward enemy king
         ray = chess.ray(sq, enemy_king_sq)
         if not ray:
             continue
-
-        # Walk from our piece to king, count enemy pieces in between
         between = chess.between(sq, enemy_king_sq)
         pieces_between = []
         for bsq in chess.scan_forward(between):
             bp = board.piece_at(bsq)
             if bp:
                 pieces_between.append((bsq, bp))
-
-        # Exactly one enemy piece between = pin
         if len(pieces_between) == 1:
             pinned_sq, pinned_piece = pieces_between[0]
             if pinned_piece.color == enemy and pinned_piece.piece_type != chess.KING:
-                board.pop()
-                return True
+                pinned.add(pinned_sq)
+    return pinned
 
+
+def _is_pin(board, move):
+    """Does the move CREATE a new pin that didn't exist before?"""
+    our_color = board.turn
+    pins_before = _find_pins(board, our_color)
+    board.push(move)
+    pins_after = _find_pins(board, our_color)
     board.pop()
-    return False
+    return len(pins_after - pins_before) > 0
 
 
 def _is_skewer(board, move):

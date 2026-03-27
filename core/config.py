@@ -6,7 +6,8 @@ import os
 
 DEFAULT_CONFIG = {
     "stockfish_path": "../stockfish/stockfish.exe",
-    "depth": 16,
+    "depth": 22,
+    "engine_time": 5,
     "threads": 2,
     "hash_size": 128,
     "multipv": 5,

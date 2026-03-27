@@ -2,6 +2,7 @@
 
 import argparse
 import sys
+import threading
 import time
 from datetime import datetime
 
@@ -43,8 +44,12 @@ def display_brilliant(info):
     print(f"{Style.RESET_ALL}")
 
 
-def analyze_premoves(fen, engine, reader, args, config):
-    """Analyze opponent's likely moves and suggest premove responses."""
+def analyze_premoves(fen, engine, reader, reader_lock, args, config):
+    """Analyze opponent's likely moves and suggest premove responses.
+
+    Runs in a background thread with its own Stockfish engine.
+    Uses reader_lock to safely access the shared ChessBoardReader.
+    """
     board = chess.Board(fen)
 
     # Get opponent's top moves (quick analysis)
@@ -53,7 +58,8 @@ def analyze_premoves(fen, engine, reader, args, config):
         return
 
     if args.assist:
-        reader.clear_arrows()
+        with reader_lock:
+            reader.clear_arrows()
 
     print(f"[{ts()}] {Fore.BLUE}Premove suggestions:{Style.RESET_ALL}")
 
@@ -90,9 +96,10 @@ def analyze_premoves(fen, engine, reader, args, config):
 
             if args.assist:
                 style = arrow_styles[i]
-                reader.draw_arrow(
-                    resp_uci[:2], resp_uci[2:4],
-                    color="#3399ff", width=style["width"])
+                with reader_lock:
+                    reader.draw_arrow(
+                        resp_uci[:2], resp_uci[2:4],
+                        color="#3399ff", width=style["width"])
 
         except Exception:
             continue
@@ -183,6 +190,17 @@ def main():
         hash_size=config["hash_size"],
         engine_time=config["engine_time"],
     )
+    # Second engine for premoves (runs in background thread)
+    premove_engine = StockfishEngine(
+        path=config["stockfish_path"],
+        depth=14,
+        threads=1,
+        hash_size=64,
+        engine_time=1,
+    )
+
+    reader_lock = threading.Lock()
+    premove_thread = None
 
     poll = config["poll_interval"]
     prev_fen = None
@@ -207,7 +225,8 @@ def main():
 
             # 1. Read game state from chess.com
             try:
-                state = reader.get_state()
+                with reader_lock:
+                    state = reader.get_state()
             except Exception as e:
                 if args.debug:
                     print(f"  [DEBUG] read error: {e}")
@@ -271,10 +290,15 @@ def main():
             # Is it the player's turn?
             player_turn = "w" if player_color == 1 else "b"
             if active_color != player_turn:
-                # Opponent's turn — analyze premove recommendations
+                # Opponent's turn — launch premoves in background thread
                 if fen != last_analyzed_fen and "K" in fen and "k" in fen:
                     last_analyzed_fen = fen
-                    analyze_premoves(fen, engine, reader, args, config)
+                    if premove_thread is None or not premove_thread.is_alive():
+                        premove_thread = threading.Thread(
+                            target=analyze_premoves,
+                            args=(fen, premove_engine, reader, reader_lock, args, config),
+                            daemon=True)
+                        premove_thread.start()
                 continue
 
             # Skip if already analyzed this exact position
@@ -310,7 +334,8 @@ def main():
 
             # Always clear previous arrows first
             if args.assist:
-                reader.clear_arrows()
+                with reader_lock:
+                    reader.clear_arrows()
 
             best_uci, best_san, best_eval, best_mate, best_pv, best_pv_uci = top_moves[0]
 
@@ -351,7 +376,8 @@ def main():
                 display_brilliant(result)
                 if args.assist:
                     uci = result["move_uci"]
-                    reader.draw_arrow(uci[:2], uci[2:4], color="#ffcc00", width=12, label="!!")
+                    with reader_lock:
+                        reader.draw_arrow(uci[:2], uci[2:4], color="#ffcc00", width=12, label="!!")
             elif best_mate is not None:
                 mate_moves = abs(best_mate)
                 our_mate = (player_turn == "w" and best_mate > 0) or \
@@ -369,14 +395,15 @@ def main():
 
                 # Draw full mate sequence as numbered arrows
                 if args.assist:
-                    if our_mate:
-                        reader.draw_move_sequence(
-                            best_pv_uci, player_turn,
-                            our_color="#ff3333", opp_color="#888888")
-                    else:
-                        reader.draw_move_sequence(
-                            best_pv_uci, player_turn,
-                            our_color="#cc0000", opp_color="#888888")
+                    with reader_lock:
+                        if our_mate:
+                            reader.draw_move_sequence(
+                                best_pv_uci, player_turn,
+                                our_color="#ff3333", opp_color="#888888")
+                        else:
+                            reader.draw_move_sequence(
+                                best_pv_uci, player_turn,
+                                our_color="#cc0000", opp_color="#888888")
             else:
                 # Re-rank by style if we have a profile
                 style_pick = None
@@ -409,16 +436,19 @@ def main():
                     print(f"Best: {best_san} ({best_eval / 100:+.1f}) | "
                           f"{Fore.CYAN}Your style: {s_san} ({s_eval / 100:+.1f}){Style.RESET_ALL}")
                     if args.assist:
-                        reader.draw_arrow(s_uci[:2], s_uci[2:4], color="#33cccc", width=10)
+                        with reader_lock:
+                            reader.draw_arrow(s_uci[:2], s_uci[2:4], color="#33cccc", width=10)
                 else:
                     print(f"Best: {best_san} ({best_eval / 100:+.1f})")
                     if args.assist:
-                        reader.draw_arrow(best_uci[:2], best_uci[2:4], color="#33cc33", width=10)
+                        with reader_lock:
+                            reader.draw_arrow(best_uci[:2], best_uci[2:4], color="#33cc33", width=10)
 
     except KeyboardInterrupt:
         print(f"\n{Fore.CYAN}Shutting down...{Style.RESET_ALL}")
     finally:
         engine.close()
+        premove_engine.close()
         reader.close()
         tracker.close()
         print("Goodbye!")

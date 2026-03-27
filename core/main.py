@@ -323,11 +323,16 @@ def main():
                     move_number = 0
                 continue
 
-            # 3. Detect color — playing_as can be 1, 2, or None
-            # If None (live game), fall back to FEN-based detection
+            # 3. Detect new game — also catch rematches by FEN move counter reset
+            fen_parts = fen.split()
+            fullmove = int(fen_parts[5]) if len(fen_parts) > 5 else 1
+            if in_game and fullmove == 1 and move_number > 2:
+                # FEN reset to move 1 mid-session = new game started
+                in_game = False
+
+            # 3b. Detect color — playing_as can be 1, 2, or None
             if playing_as is None:
-                # Assume white=1 if not flipped, board_reader handles this
-                playing_as = 1  # default, board_reader detects flip
+                playing_as = 1
 
             if playing_as != player_color or not in_game:
                 player_color = playing_as

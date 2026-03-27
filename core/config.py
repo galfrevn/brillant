@@ -6,10 +6,10 @@ import os
 
 DEFAULT_CONFIG = {
     "stockfish_path": "../stockfish/stockfish.exe",
-    "depth": 22,
-    "engine_time": 3,
-    "threads": 2,
-    "hash_size": 128,
+    "depth": 20,
+    "engine_time": 2,
+    "threads": 4,
+    "hash_size": 256,
     "multipv": 5,
     "poll_interval": 0.3,
     "confidence": 0.75,

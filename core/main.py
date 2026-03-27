@@ -4,6 +4,7 @@ import argparse
 import sys
 import threading
 import time
+import winsound
 from datetime import datetime
 
 import chess
@@ -65,7 +66,45 @@ def get_forced_mate_fens(fen, pv_uci):
     return keys
 
 
-def analyze_premoves(fen, engine, reader, reader_lock, args, config):
+def play_sound(kind):
+    """Play alert sound in a background thread. kind: 'brilliant' or 'mate'."""
+    def _beep():
+        try:
+            if kind == "brilliant":
+                winsound.Beep(1000, 150)
+                time.sleep(0.05)
+                winsound.Beep(1000, 150)
+            elif kind == "mate":
+                winsound.Beep(500, 300)
+        except Exception:
+            pass
+    threading.Thread(target=_beep, daemon=True).start()
+
+
+def get_elo_premove_settings(opponent_elo):
+    """Return (candidates, depth, time_limit) based on opponent's ELO."""
+    if opponent_elo is None or opponent_elo > 1800:
+        return 3, 14, 1.0
+    elif opponent_elo > 1200:
+        return 2, 12, 0.8
+    else:
+        return 1, 10, 0.5
+
+
+def get_clock_overrides(our_time, config):
+    """Return (depth, time_limit, poll_interval) adjusted for time pressure."""
+    if our_time is None or our_time > 60:
+        return config["depth"], config["engine_time"], config["poll_interval"]
+    elif our_time > 30:
+        return 16, 1.5, 0.3
+    elif our_time > 10:
+        return 12, 0.8, 0.2
+    else:
+        return 8, 0.3, 0.15
+
+
+def analyze_premoves(fen, engine, reader, reader_lock, args, config,
+                     candidates=3, pm_depth=14, pm_time=1.0):
     """Analyze opponent's likely moves and suggest premove responses.
 
     Runs in a background thread with its own Stockfish engine.
@@ -73,8 +112,8 @@ def analyze_premoves(fen, engine, reader, reader_lock, args, config):
     """
     board = chess.Board(fen)
 
-    # Get opponent's top moves (quick analysis)
-    opp_moves = engine.analyze_top_moves(fen, 3, depth=14, time_limit=1)
+    # Get opponent's top moves (quick analysis, depth/candidates adjusted by ELO)
+    opp_moves = engine.analyze_top_moves(fen, candidates, depth=pm_depth, time_limit=pm_time)
     if not opp_moves:
         return
 
@@ -91,14 +130,14 @@ def analyze_premoves(fen, engine, reader, reader_lock, args, config):
         {"width": 5},   # unlikely
     ]
 
-    for i, (opp_uci, opp_san, opp_eval, opp_mate, _, _) in enumerate(opp_moves[:3]):
+    for i, (opp_uci, opp_san, opp_eval, opp_mate, _, _) in enumerate(opp_moves[:candidates]):
         try:
             opp_move = chess.Move.from_uci(opp_uci)
             board.push(opp_move)
             response_fen = board.fen()
 
             # Analyze our best response (fast)
-            responses = engine.analyze_top_moves(response_fen, 1, depth=14, time_limit=1)
+            responses = engine.analyze_top_moves(response_fen, 1, depth=pm_depth, time_limit=pm_time)
             board.pop()
 
             if not responses:
@@ -225,10 +264,13 @@ def main():
     forced_mate_fens = None  # set of position keys when forced mate sequence is active
 
     poll = config["poll_interval"]
+    base_poll = poll  # remember original for clock reset
     prev_fen = None
     last_analyzed_fen = None
     player_color = None
     in_game = False
+    opponent_elo = None
+    pm_candidates, pm_depth, pm_time = 3, 14, 1.0  # premove settings (adjusted by ELO)
     tracker = StyleTracker()
     style_profile = tracker.get_style_profile()
     if style_profile:
@@ -299,8 +341,14 @@ def main():
                 move_number = 0
                 color_display = "white" if player_color == 1 else "black"
                 game_id = tracker.start_game(color_display)
+
+                # Read opponent ELO and set premove strategy
+                opponent_elo = state.get("opponent_elo")
+                pm_candidates, pm_depth, pm_time = get_elo_premove_settings(opponent_elo)
+                elo_str = str(opponent_elo) if opponent_elo else "?"
                 print(f"[{ts()}] {Fore.GREEN}Game active!{Style.RESET_ALL} "
-                      f"Playing as {Fore.CYAN}{color_display}{Style.RESET_ALL}")
+                      f"Playing as {Fore.CYAN}{color_display}{Style.RESET_ALL} "
+                      f"vs {Fore.YELLOW}{elo_str} ELO{Style.RESET_ALL}")
 
             # 4. FEN unchanged — skip
             if fen == prev_fen:
@@ -315,7 +363,12 @@ def main():
                     # Position deviated from forced line
                     forced_mate_fens = None
 
-            # 5. Determine whose turn it is from FEN
+            # 5. Adapt to clock pressure
+            our_time = state.get("our_time")
+            clock_depth, clock_time, clock_poll = get_clock_overrides(our_time, config)
+            poll = clock_poll
+
+            # 6. Determine whose turn it is from FEN
             parts = fen.split()
             active_color = parts[1] if len(parts) > 1 else "w"
 
@@ -328,7 +381,8 @@ def main():
                     if premove_thread is None or not premove_thread.is_alive():
                         premove_thread = threading.Thread(
                             target=analyze_premoves,
-                            args=(fen, premove_engine, reader, reader_lock, args, config),
+                            args=(fen, premove_engine, reader, reader_lock, args, config,
+                                  pm_candidates, pm_depth, pm_time),
                             daemon=True)
                         premove_thread.start()
                 continue
@@ -355,9 +409,10 @@ def main():
 
             last_analyzed_fen = fen
 
-            # 7. Analyze!
+            # 8. Analyze! (depth/time adapted to clock)
             print(f"[{ts()}] Analyzing...", end=" ", flush=True)
-            top_moves = engine.analyze_top_moves(fen, config["multipv"])
+            top_moves = engine.analyze_top_moves(fen, config["multipv"],
+                                                  depth=clock_depth, time_limit=clock_time)
             if not top_moves:
                 print("skip.")
                 continue
@@ -406,6 +461,7 @@ def main():
             if result:
                 print()
                 display_brilliant(result)
+                play_sound("brilliant")
                 if args.assist:
                     uci = result["move_uci"]
                     with reader_lock:
@@ -426,6 +482,7 @@ def main():
                     fm_fens = get_forced_mate_fens(fen, best_pv_uci)
                     if fm_fens is not None:
                         forced_mate_fens = fm_fens
+                        play_sound("mate")
                         print(f"  {Fore.GREEN}Forced mate — arrows locked, premove the whole line!{Style.RESET_ALL}")
                 else:
                     print(f"{Fore.RED}Opponent has mate in {mate_moves}. "

@@ -58,7 +58,7 @@ def analyze_premoves(fen, engine, reader, args, config):
 
     print(f"[{ts()}] {Fore.BLUE}Premove suggestions:{Style.RESET_ALL}")
 
-    for i, (opp_uci, opp_san, opp_eval, opp_mate, _) in enumerate(opp_moves[:3]):
+    for i, (opp_uci, opp_san, opp_eval, opp_mate, _, _) in enumerate(opp_moves[:3]):
         try:
             opp_move = chess.Move.from_uci(opp_uci)
             board.push(opp_move)
@@ -71,7 +71,7 @@ def analyze_premoves(fen, engine, reader, args, config):
             if not responses:
                 continue
 
-            resp_uci, resp_san, resp_eval, resp_mate, _ = responses[0]
+            resp_uci, resp_san, resp_eval, resp_mate, _, _ = responses[0]
 
             if resp_mate is not None:
                 eval_display = f"mate {abs(resp_mate)}"
@@ -173,6 +173,7 @@ def main():
         depth=config["depth"],
         threads=config["threads"],
         hash_size=config["hash_size"],
+        engine_time=config["engine_time"],
     )
 
     poll = config["poll_interval"]
@@ -303,7 +304,7 @@ def main():
             if args.assist:
                 reader.clear_arrows()
 
-            best_uci, best_san, best_eval, best_mate, best_pv = top_moves[0]
+            best_uci, best_san, best_eval, best_mate, best_pv, best_pv_uci = top_moves[0]
 
             # Track move in style DB
             move_number += 1
@@ -369,7 +370,7 @@ def main():
                 if style_profile and len(top_moves) > 1:
                     board_for_style = chess.Board(fen)
                     scored = []
-                    for m_uci, m_san, m_eval, m_mate, m_pv in top_moves:
+                    for m_uci, m_san, m_eval, m_mate, m_pv, _ in top_moves:
                         if m_mate is not None:
                             continue
                         try:

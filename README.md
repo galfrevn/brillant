@@ -26,6 +26,10 @@ mate sequences with premove suggestions and can draw move arrows directly on the
   mate).
 - **Bullet mode** (`--bullet`) -- lowers analysis depth and poll interval for fast
   time controls.
+- **Style learning** -- tracks your moves in SQLite, builds a player profile, and
+  suggests moves that match your style alongside the engine's best.
+- **Style stats** (`--stats`) -- shows your playing style summary: accuracy,
+  sacrifice rate, favorite pieces, and style classification.
 
 ## Requirements
 
@@ -95,6 +99,7 @@ py main.py
 | `--debug`      | flag  | off     | Print FEN and diagnostic info for each position  |
 | `--assist`     | flag  | off     | Draw move arrows on the chess.com board          |
 | `--bullet`     | flag  | off     | Bullet mode: depth 8, 0.2s poll interval         |
+| `--stats`      | flag  | off     | Show your playing style statistics and exit       |
 
 ## How It Works
 
@@ -157,8 +162,7 @@ brillant/
 │   ├── engine.py         # Stockfish UCI wrapper (MultiPV analysis)
 │   ├── board_reader.py   # Chrome DevTools Protocol interface
 │   ├── brilliant.py      # Brilliant move classification logic
-│   ├── capture.py        # (Legacy) Screenshot capture via mss
-│   └── recognition.py    # (Legacy) OpenCV template matching
+│   └── style.py          # Player style tracker (SQLite)
 ├── stockfish/            # Place stockfish.exe here (not tracked)
 ├── requirements.txt
 ├── .gitignore

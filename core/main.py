@@ -44,6 +44,27 @@ def display_brilliant(info):
     print(f"{Style.RESET_ALL}")
 
 
+def _pos_key(fen):
+    """Position key from FEN (board + turn + castling + en passant, ignoring move counters)."""
+    return " ".join(fen.split()[:4])
+
+
+def get_forced_mate_fens(fen, pv_uci):
+    """If opponent has exactly one legal move at each of their steps in the PV,
+    return the set of position keys for every position in the sequence.
+    Returns None if not fully forced."""
+    board = chess.Board(fen)
+    keys = {_pos_key(fen)}
+    for i, uci in enumerate(pv_uci):
+        move = chess.Move.from_uci(uci)
+        if i % 2 == 1:  # opponent's turn
+            if len(list(board.legal_moves)) != 1:
+                return None
+        board.push(move)
+        keys.add(_pos_key(board.fen()))
+    return keys
+
+
 def analyze_premoves(fen, engine, reader, reader_lock, args, config):
     """Analyze opponent's likely moves and suggest premove responses.
 
@@ -201,6 +222,7 @@ def main():
 
     reader_lock = threading.Lock()
     premove_thread = None
+    forced_mate_fens = None  # set of position keys when forced mate sequence is active
 
     poll = config["poll_interval"]
     prev_fen = None
@@ -257,6 +279,7 @@ def main():
                     in_game = False
                     prev_fen = None
                     last_analyzed_fen = None
+                    forced_mate_fens = None
                     game_id = None
                     move_number = 0
                 continue
@@ -272,6 +295,7 @@ def main():
                 in_game = True
                 prev_fen = None
                 last_analyzed_fen = None
+                forced_mate_fens = None
                 move_number = 0
                 color_display = "white" if player_color == 1 else "black"
                 game_id = tracker.start_game(color_display)
@@ -282,6 +306,14 @@ def main():
             if fen == prev_fen:
                 continue
             prev_fen = fen
+
+            # 4.5. Forced mate in progress — keep arrows, skip analysis
+            if forced_mate_fens is not None:
+                if _pos_key(fen) in forced_mate_fens:
+                    continue
+                else:
+                    # Position deviated from forced line
+                    forced_mate_fens = None
 
             # 5. Determine whose turn it is from FEN
             parts = fen.split()
@@ -389,6 +421,12 @@ def main():
                     print(f"  MATE in {mate_moves}!")
                     print(f"  Premoves: {sequence}")
                     print(f"{Style.RESET_ALL}")
+
+                    # Check if mate is forced (opponent has only one legal move at each step)
+                    fm_fens = get_forced_mate_fens(fen, best_pv_uci)
+                    if fm_fens is not None:
+                        forced_mate_fens = fm_fens
+                        print(f"  {Fore.GREEN}Forced mate — arrows locked, premove the whole line!{Style.RESET_ALL}")
                 else:
                     print(f"{Fore.RED}Opponent has mate in {mate_moves}. "
                           f"Best: {best_san}{Style.RESET_ALL}")

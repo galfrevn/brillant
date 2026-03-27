@@ -102,10 +102,10 @@ class ChessBoardReader:
                 return result.get("value")
 
     def get_state(self):
-        """Read FEN, player color, and game status from chess.com.
+        """Read FEN, player color, game status, opponent ELO, and clock from chess.com.
 
-        Returns dict with keys: fen, playing_as, is_game_over, result
-        Or None if no board is found.
+        Returns dict with keys: fen, playing_as, is_game_over, result,
+        opponent_elo, our_time.  Or None if no board is found.
         """
         js = """
         (() => {
@@ -120,18 +120,73 @@ class ChessBoardReader:
             const playing_as = flipped ? 2 : 1;
 
             // Detect game over — check for visible game-over UI elements
-            // state.isGameOver stays true even when reviewing, so check the DOM
             const gameOverModal = document.querySelector(
                 '.game-over-modal-content, .game-result-header, ' +
                 '[class*="game-over-modal"], [class*="modal-game-over"]'
             );
             const is_game_over = !!gameOverModal;
 
+            // Read opponent ELO — opponent is top player when not flipped, bottom when flipped
+            let opponent_elo = null;
+            try {
+                // chess.com shows player panels: top and bottom
+                const panels = document.querySelectorAll(
+                    '[class*="player-tagline"], [class*="user-tagline"]');
+                // Try to find a rating number (3-4 digits in parens or standalone)
+                for (const p of panels) {
+                    const txt = p.textContent || '';
+                    const m = txt.match(/\\b(\\d{3,4})\\b/);
+                    if (m) {
+                        // First match is top player, second is bottom player
+                        // Opponent is top when not flipped, bottom when flipped
+                        opponent_elo = parseInt(m[1]);
+                        break;
+                    }
+                }
+                if (!opponent_elo) {
+                    // Fallback: search for any rating-like element
+                    const ratingEl = document.querySelector(
+                        '[class*="rating"], [data-cy*="rating"]');
+                    if (ratingEl) {
+                        const m = (ratingEl.textContent || '').match(/\\b(\\d{3,4})\\b/);
+                        if (m) opponent_elo = parseInt(m[1]);
+                    }
+                }
+            } catch(e) {}
+
+            // Read our remaining clock time
+            let our_time = null;
+            try {
+                const clocks = document.querySelectorAll(
+                    '[class*="clock-time"], .clock-component');
+                // clocks[0] = top, clocks[1] = bottom typically
+                // Our clock: bottom when not flipped, top when flipped
+                const ourIdx = flipped ? 0 : 1;
+                if (clocks.length >= 2) {
+                    const txt = (clocks[ourIdx].textContent || '').trim();
+                    // Parse MM:SS, M:SS, H:MM:SS, or SS.s formats
+                    let secs = null;
+                    const hms = txt.match(/(\\d+):(\\d+):(\\d+)/);
+                    const ms = txt.match(/^(\\d+):(\\d+\\.?\\d*)$/);
+                    const s = txt.match(/^(\\d+\\.?\\d*)$/);
+                    if (hms) {
+                        secs = parseInt(hms[1]) * 3600 + parseInt(hms[2]) * 60 + parseFloat(hms[3]);
+                    } else if (ms) {
+                        secs = parseInt(ms[1]) * 60 + parseFloat(ms[2]);
+                    } else if (s) {
+                        secs = parseFloat(s[1]);
+                    }
+                    our_time = secs;
+                }
+            } catch(e) {}
+
             return {
                 fen: fen,
                 playing_as: playing_as,
                 is_game_over: is_game_over,
                 result: null,
+                opponent_elo: opponent_elo,
+                our_time: our_time,
             };
         })()
         """

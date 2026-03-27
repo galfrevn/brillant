@@ -1,0 +1,4 @@
+python-chess
+colorama
+requests
+websocket-client

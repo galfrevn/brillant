@@ -13,6 +13,7 @@ from config import load_config
 from engine import StockfishEngine
 from board_reader import ChessBoardReader
 from brilliant import find_brilliant_move
+from tactics import classify_tactic, find_opponent_threats
 from style import StyleTracker
 
 PIECE_NAMES = {
@@ -47,6 +48,84 @@ def display_brilliant(info):
 def _pos_key(fen):
     """Position key from FEN (board + turn + castling + en passant, ignoring move counters)."""
     return " ".join(fen.split()[:4])
+
+
+def detect_played_move(prev_fen, current_fen):
+    """Determine what move was played by comparing two FENs."""
+    try:
+        board = chess.Board(prev_fen)
+        # Compare board position + active color (ignore castling/ep/counters)
+        target_parts = current_fen.split()
+        target_key = target_parts[0] + " " + target_parts[1]
+        for move in board.legal_moves:
+            board.push(move)
+            parts = board.fen().split()
+            key = parts[0] + " " + parts[1]
+            if key == target_key:
+                board.pop()
+                return move
+            board.pop()
+    except Exception:
+        pass
+    return None
+
+
+def show_review(game_moves, engine):
+    """Display post-game review with accuracy and move classifications."""
+    if not game_moves:
+        print(f"\n{Fore.CYAN}No moves to review.{Style.RESET_ALL}")
+        return
+
+    categories = {"Perfect": 0, "Good": 0, "Inaccuracy": 0, "Mistake": 0, "Blunder": 0}
+    worst_move = None
+    worst_delta = 0
+    best_move = None
+    best_info = None
+    total_delta = 0
+
+    for i, m in enumerate(game_moves):
+        delta = abs(m.get("delta_cp", 0))
+        total_delta += delta
+
+        if delta < 10:
+            cat = "Perfect"
+        elif delta < 50:
+            cat = "Good"
+        elif delta < 100:
+            cat = "Inaccuracy"
+        elif delta < 300:
+            cat = "Mistake"
+        else:
+            cat = "Blunder"
+        categories[cat] += 1
+
+        if delta > worst_delta:
+            worst_delta = delta
+            worst_move = m
+
+        if m.get("is_brilliant"):
+            best_move = m
+
+    total = len(game_moves)
+    perfect_and_good = categories["Perfect"] + categories["Good"]
+    accuracy = round(perfect_and_good / total * 100) if total > 0 else 0
+
+    print(f"\n{Fore.CYAN}{Style.BRIGHT}{'=' * 48}")
+    print(f"  POST-GAME REVIEW")
+    print(f"{'=' * 48}{Style.RESET_ALL}")
+    print(f"  Moves: {total} | Accuracy: {Fore.GREEN}{accuracy}%{Style.RESET_ALL}")
+    print(f"  Perfect: {categories['Perfect']} | Good: {categories['Good']} | "
+          f"Inaccuracy: {categories['Inaccuracy']} | "
+          f"Mistake: {Fore.YELLOW}{categories['Mistake']}{Style.RESET_ALL} | "
+          f"Blunder: {Fore.RED}{categories['Blunder']}{Style.RESET_ALL}")
+
+    if worst_move and worst_delta >= 50:
+        print(f"\n  Worst: move {worst_move['move_num']} {worst_move['played_san']} "
+              f"({Fore.RED}-{worst_delta / 100:.1f} pawns{Style.RESET_ALL})")
+    if best_move:
+        print(f"  Best:  move {best_move['move_num']} {best_move['played_san']} "
+              f"({Fore.YELLOW}brilliant!{Style.RESET_ALL})")
+    print()
 
 
 def get_forced_mate_fens(fen, pv_uci):
@@ -177,6 +256,10 @@ def parse_args():
                         help="Bullet mode: fast analysis (depth 8, instant response)")
     parser.add_argument("--stats", action="store_true",
                         help="Show your playing style stats and exit")
+    parser.add_argument("--heatmap", action="store_true",
+                        help="Highlight squares where your pieces are under attack")
+    parser.add_argument("--review", action="store_true",
+                        help="Show post-game review with accuracy and move classification")
     return parser.parse_args()
 
 
@@ -268,6 +351,9 @@ def main():
     opponent_elo = None
     pm_candidates, pm_depth, pm_time = 3, 14, 1.0  # premove settings (adjusted by ELO)
     elo_depth, elo_time = config["depth"], config["engine_time"]  # main analysis (adjusted by ELO)
+    game_moves = []  # for post-game review: list of move dicts
+    last_engine_best = None  # {san, eval, fen} — saved when we analyze on our turn
+    last_our_fen = None  # FEN from our last analyzed turn
     tracker = StyleTracker()
     style_profile = tracker.get_style_profile()
     if style_profile:
@@ -315,12 +401,17 @@ def main():
                     print(f"[{ts()}] {Fore.RED}Game over.{Style.RESET_ALL} {result}")
                     if game_id:
                         tracker.end_game(game_id, result or "unknown")
+                    if args.review and game_moves:
+                        show_review(game_moves, engine)
                     in_game = False
                     prev_fen = None
                     last_analyzed_fen = None
                     forced_mate_fens = None
                     game_id = None
                     move_number = 0
+                    game_moves = []
+                    last_engine_best = None
+                    last_our_fen = None
                 continue
 
             # 3. Detect new game — also catch rematches by FEN move counter reset
@@ -343,6 +434,9 @@ def main():
                 move_number = 0
                 color_display = "white" if player_color == 1 else "black"
                 game_id = tracker.start_game(color_display)
+                game_moves = []
+                last_engine_best = None
+                last_our_fen = None
 
                 # Read opponent ELO and adapt strategy
                 opponent_elo = state.get("opponent_elo")
@@ -378,6 +472,27 @@ def main():
             # Is it the player's turn?
             player_turn = "w" if player_color == 1 else "b"
             if active_color != player_turn:
+                # Track actual move played (for post-game review)
+                if args.review and last_our_fen and last_engine_best:
+                    played = detect_played_move(last_our_fen, fen)
+                    if played:
+                        try:
+                            pb = chess.Board(last_our_fen)
+                            played_san = pb.san(played)
+                        except Exception:
+                            played_san = played.uci()
+                        game_moves.append({
+                            "move_num": len(game_moves) + 1,
+                            "fen": last_our_fen,
+                            "played_san": played_san,
+                            "played_uci": played.uci(),
+                            "engine_best_san": last_engine_best["san"],
+                            "engine_best_eval": last_engine_best["eval"],
+                            "delta_cp": last_engine_best.get("delta", 0),
+                            "is_brilliant": last_engine_best.get("is_brilliant", False),
+                        })
+                    last_engine_best = None
+
                 # Opponent's turn — launch premoves in background thread
                 if fen != last_analyzed_fen and "K" in fen and "k" in fen:
                     last_analyzed_fen = fen
@@ -429,6 +544,51 @@ def main():
 
             best_uci, best_san, best_eval, best_mate, best_pv, best_pv_uci = top_moves[0]
 
+            # Save for post-game review: engine's best + eval delta
+            last_our_fen = fen
+            second_eval = top_moves[1][2] if len(top_moves) > 1 else best_eval
+            last_engine_best = {
+                "san": best_san,
+                "eval": best_eval,
+                "delta": abs(best_eval - second_eval),
+                "is_brilliant": False,
+            }
+
+            # Detect tactics on best move
+            try:
+                tactic_board = chess.Board(fen)
+                best_move_obj = chess.Move.from_uci(best_uci)
+                tactic_label = classify_tactic(tactic_board, best_move_obj)
+                if tactic_label:
+                    print(f"{Fore.YELLOW}{tactic_label}!{Style.RESET_ALL} ", end="")
+            except Exception:
+                tactic_label = None
+
+            # Detect opponent threats
+            try:
+                tactic_board = chess.Board(fen)
+                threats = find_opponent_threats(tactic_board)
+                for t in threats:
+                    print(f"{Fore.RED}  ⚠ Opponent threat: {t['move_san']} ({t['tactic']}){Style.RESET_ALL}")
+            except Exception:
+                threats = []
+
+            # Heatmap: highlight our pieces under attack
+            if args.heatmap and args.assist:
+                try:
+                    hm_board = chess.Board(fen)
+                    threatened = []
+                    for sq in chess.SQUARES:
+                        p = hm_board.piece_at(sq)
+                        if p and p.color == hm_board.turn:
+                            if hm_board.is_attacked_by(not hm_board.turn, sq):
+                                threatened.append(chess.square_name(sq))
+                    if threatened:
+                        with reader_lock:
+                            reader.draw_heatmap(threatened)
+                except Exception:
+                    pass
+
             # Track move in style DB
             move_number += 1
             piece_moved = None
@@ -464,6 +624,8 @@ def main():
             if result:
                 print()
                 display_brilliant(result)
+                if last_engine_best:
+                    last_engine_best["is_brilliant"] = True
 
                 if args.assist:
                     uci = result["move_uci"]
@@ -540,7 +702,8 @@ def main():
                     print(f"Best: {best_san} ({best_eval / 100:+.1f})")
                     if args.assist:
                         with reader_lock:
-                            reader.draw_arrow(best_uci[:2], best_uci[2:4], color="#33cc33", width=10)
+                            reader.draw_arrow(best_uci[:2], best_uci[2:4], color="#33cc33",
+                                              width=10, label=tactic_label)
 
     except KeyboardInterrupt:
         print(f"\n{Fore.CYAN}Shutting down...{Style.RESET_ALL}")

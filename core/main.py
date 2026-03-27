@@ -4,7 +4,6 @@ import argparse
 import sys
 import threading
 import time
-import winsound
 from datetime import datetime
 
 import chess
@@ -65,20 +64,6 @@ def get_forced_mate_fens(fen, pv_uci):
         keys.add(_pos_key(board.fen()))
     return keys
 
-
-def play_sound(kind):
-    """Play alert sound in a background thread. kind: 'brilliant' or 'mate'."""
-    def _beep():
-        try:
-            if kind == "brilliant":
-                winsound.Beep(1000, 150)
-                time.sleep(0.05)
-                winsound.Beep(1000, 150)
-            elif kind == "mate":
-                winsound.Beep(500, 300)
-        except Exception:
-            pass
-    threading.Thread(target=_beep, daemon=True).start()
 
 
 def get_elo_premove_settings(opponent_elo):
@@ -474,7 +459,7 @@ def main():
             if result:
                 print()
                 display_brilliant(result)
-                play_sound("brilliant")
+
                 if args.assist:
                     uci = result["move_uci"]
                     with reader_lock:
@@ -495,7 +480,7 @@ def main():
                     fm_fens = get_forced_mate_fens(fen, best_pv_uci)
                     if fm_fens is not None:
                         forced_mate_fens = fm_fens
-                        play_sound("mate")
+
                         print(f"  {Fore.GREEN}Forced mate — arrows locked, premove the whole line!{Style.RESET_ALL}")
                 else:
                     print(f"{Fore.RED}Opponent has mate in {mate_moves}. "

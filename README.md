@@ -75,7 +75,7 @@ mate sequences with premove suggestions and can draw move arrows directly on the
 Run from the `core/` subdirectory:
 
 ```
-cd chess
+cd core
 py main.py
 ```
 

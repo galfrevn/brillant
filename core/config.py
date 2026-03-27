@@ -10,7 +10,7 @@ DEFAULT_CONFIG = {
     "engine_time": 2,
     "threads": 8,
     "hash_size": 512,
-    "multipv": 5,
+    "multipv": 3,
     "poll_interval": 0.3,
     "confidence": 0.75,
     "hash_threshold": 5,

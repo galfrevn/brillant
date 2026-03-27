@@ -15,12 +15,14 @@ class StockfishEngine:
         self.engine = chess.engine.SimpleEngine.popen_uci(self.path)
         self.engine.configure({"Threads": self.threads, "Hash": self.hash_size})
 
-    def analyze_top_moves(self, fen, num_moves=5):
+    def analyze_top_moves(self, fen, num_moves=5, depth=None, time_limit=None):
         board = chess.Board(fen)
         try:
             results = self.engine.analyse(
                 board,
-                chess.engine.Limit(depth=self.depth, time=self.engine_time),
+                chess.engine.Limit(
+                    depth=depth or self.depth,
+                    time=time_limit or self.engine_time),
                 multipv=num_moves,
             )
         except (chess.engine.EngineTerminatedError, chess.engine.EngineError, Exception):

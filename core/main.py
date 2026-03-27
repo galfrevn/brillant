@@ -47,8 +47,8 @@ def analyze_premoves(fen, engine, reader, args, config):
     """Analyze opponent's likely moves and suggest premove responses."""
     board = chess.Board(fen)
 
-    # Get opponent's top moves
-    opp_moves = engine.analyze_top_moves(fen, 3)
+    # Get opponent's top moves (quick analysis)
+    opp_moves = engine.analyze_top_moves(fen, 3, depth=14, time_limit=1)
     if not opp_moves:
         return
 
@@ -70,8 +70,8 @@ def analyze_premoves(fen, engine, reader, args, config):
             board.push(opp_move)
             response_fen = board.fen()
 
-            # Analyze our best response (quick)
-            responses = engine.analyze_top_moves(response_fen, 1)
+            # Analyze our best response (fast)
+            responses = engine.analyze_top_moves(response_fen, 1, depth=14, time_limit=1)
             board.pop()
 
             if not responses:

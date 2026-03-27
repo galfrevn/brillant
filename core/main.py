@@ -45,7 +45,6 @@ def display_brilliant(info):
 
 def analyze_premoves(fen, engine, reader, args, config):
     """Analyze opponent's likely moves and suggest premove responses."""
-    depth = min(config["depth"], 10)  # Shallow for speed
     board = chess.Board(fen)
 
     # Get opponent's top moves
@@ -57,6 +56,13 @@ def analyze_premoves(fen, engine, reader, args, config):
         reader.clear_arrows()
 
     print(f"[{ts()}] {Fore.BLUE}Premove suggestions:{Style.RESET_ALL}")
+
+    # Visual weight per likelihood rank
+    arrow_styles = [
+        {"width": 10},  # most likely
+        {"width": 7},   # possible
+        {"width": 5},   # unlikely
+    ]
 
     for i, (opp_uci, opp_san, opp_eval, opp_mate, _, _) in enumerate(opp_moves[:3]):
         try:
@@ -82,9 +88,11 @@ def analyze_premoves(fen, engine, reader, args, config):
             likelihood = ["(likely)", "(possible)", "(unlikely)"][i]
             print(f"{prefix} If {opp_san} {likelihood} → premove {Fore.GREEN}{resp_san}{Style.RESET_ALL} ({eval_display})")
 
-            if args.assist and i == 0:
-                reader.clear_arrows()
-                reader.draw_arrow(resp_uci[:2], resp_uci[2:4], color="#3399ff", width=10)
+            if args.assist:
+                style = arrow_styles[i]
+                reader.draw_arrow(
+                    resp_uci[:2], resp_uci[2:4],
+                    color="#3399ff", width=style["width"])
 
         except Exception:
             continue

@@ -433,8 +433,65 @@ class ChessBoardReader:
         """
         return self._eval_js(js)
 
+    def draw_heatmap(self, squares):
+        """Draw semi-transparent red rectangles on threatened squares."""
+        if not squares:
+            return
+        import json as _json
+        squares_json = _json.dumps(squares)
+        js = f"""
+        (() => {{
+            const board = document.querySelector('wc-chess-board');
+            if (!board) return 'no-board';
+            const canvas = board.querySelector('canvas');
+            const target = canvas || board;
+            const rect = target.getBoundingClientRect();
+            if (rect.width === 0) return 'no-rect';
+            const sqSize = rect.width / 8;
+            const flipped = !!board.flipped || board.hasAttribute('flipped') ||
+                            (board.getAttribute('class') || '').includes('flipped');
+
+            function sqToTopLeft(sq) {{
+                const file = sq.charCodeAt(0) - 97;
+                const rank = parseInt(sq[1]) - 1;
+                let x, y;
+                if (flipped) {{
+                    x = rect.left + (7 - file) * sqSize;
+                    y = rect.top + rank * sqSize;
+                }} else {{
+                    x = rect.left + file * sqSize;
+                    y = rect.top + (7 - rank) * sqSize;
+                }}
+                return [x, y];
+            }}
+
+            let svg = document.getElementById('chess-detector-arrows');
+            if (!svg) {{
+                svg = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
+                svg.id = 'chess-detector-arrows';
+                svg.style.cssText = 'position:fixed;top:0;left:0;width:100vw;height:100vh;pointer-events:none;z-index:99999;';
+                document.body.appendChild(svg);
+            }}
+
+            const squares = {squares_json};
+            for (const sq of squares) {{
+                const [x, y] = sqToTopLeft(sq);
+                const r = document.createElementNS('http://www.w3.org/2000/svg', 'rect');
+                r.setAttribute('x', x);
+                r.setAttribute('y', y);
+                r.setAttribute('width', sqSize);
+                r.setAttribute('height', sqSize);
+                r.setAttribute('fill', 'rgba(255, 0, 0, 0.25)');
+                r.classList.add('chess-detector-heatmap');
+                svg.appendChild(r);
+            }}
+            return true;
+        }})()
+        """
+        return self._eval_js(js)
+
     def clear_arrows(self):
-        """Remove all drawn arrows."""
+        """Remove all drawn arrows and heatmap overlays."""
         js = """
         (() => {
             const svg = document.getElementById('chess-detector-arrows');
